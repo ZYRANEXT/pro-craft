@@ -493,3 +493,79 @@ async function unlockLicense(){
   localStorage.setItem("craft_license_key", key);
   applyLicenseGate();
 }
+
+
+/* FINAL FIX: key-only one-device license validation */
+async function unlockLicense(){
+  const input = document.getElementById("licenseInput");
+  const status = document.getElementById("licenseStatus");
+  const key = (input?.value || "").trim();
+
+  if(status) status.textContent = "Checking license...";
+
+  const sb = getSupabase();
+  if(!sb){
+    if(status) status.textContent = "Supabase is not configured in app.js.";
+    return;
+  }
+
+  if(!key){
+    if(status) status.textContent = "Enter your license key.";
+    return;
+  }
+
+  const currentDevice = deviceId();
+
+  const { data, error } = await sb
+    .from("licenses")
+    .select("license_key,status,used,device_id")
+    .eq("license_key", key)
+    .maybeSingle();
+
+  if(error){
+    console.error("License select error", error);
+    if(status) status.textContent = "License check failed: " + error.message;
+    return;
+  }
+
+  if(!data){
+    if(status) status.textContent = "Invalid license key.";
+    return;
+  }
+
+  if(data.status !== "active"){
+    if(status) status.textContent = "This license is not active.";
+    return;
+  }
+
+  if(data.used === true && data.device_id && data.device_id !== currentDevice){
+    if(status) status.textContent = "This license has already been activated on another device.";
+    return;
+  }
+
+  if(data.used === true && data.device_id === currentDevice){
+    localStorage.setItem("craftprofitcalc_license_ok", "true");
+    localStorage.setItem("craft_license_key", key);
+    applyLicenseGate();
+    return;
+  }
+
+  const { error: updateError } = await sb
+    .from("licenses")
+    .update({
+      used: true,
+      used_at: new Date().toISOString(),
+      device_id: currentDevice
+    })
+    .eq("license_key", key);
+
+  if(updateError){
+    console.error("License update error", updateError);
+    if(status) status.textContent = "Could not activate license: " + updateError.message;
+    return;
+  }
+
+  localStorage.setItem("craftprofitcalc_license_ok", "true");
+  localStorage.setItem("craft_license_key", key);
+  applyLicenseGate();
+}
